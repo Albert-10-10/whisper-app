@@ -1,4 +1,3 @@
-//jshint esversion:6
 require('dotenv').config()
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -7,7 +6,6 @@ const mongoose = require("mongoose");
 const session = require('express-session');
 const passport = require("passport");
 const passportLocalMongoose = require('passport-local-mongoose');
-
 const app = express();
 
 app.use(express.static("public"));
@@ -15,7 +13,7 @@ app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({extended: true}));
 
 app.use(session({
-    secret: "Albert's little secret.",
+    secret: process.env.SECRET,
     resave: false,
     saveUninitialized: false,
 }));
@@ -29,7 +27,8 @@ mongoose.connect('mongodb://127.0.0.1:27017/userDB');
 
 const userSchema = new mongoose.Schema({
     email : String,
-    password : String
+    password : String,
+    secret : String
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -38,8 +37,21 @@ const User = mongoose.model("user", userSchema);
 
 passport.use(User.createStrategy());
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+passport.serializeUser(function(user, cb) {
+    process.nextTick(function() {
+      return cb(null, {
+        id: user.id,
+        username: user.username,
+        picture: user.picture
+      });
+    });
+  });
+  
+  passport.deserializeUser(function(user, cb) {
+    process.nextTick(function() {
+      return cb(null, user);
+    });
+  });
 
 app.get("/", (req,res)=>{
     res.render("Home");
@@ -67,12 +79,42 @@ app.route("/login")
     });
 
 app.get("/secrets", (req, res)=>{
-    if (req.isAuthenticated()){
-        res.render("secrets");
+   User.find({"secret": {$ne : null}}, (err, foundUsers)=>{
+    if (err){
+        console.log(err);
     } else {
-        res.redirect("/login");
+        if (foundUsers) {
+            res.render("secrets", {usersWithSecrets : foundUsers});
+        }
     }
+   })
 });
+
+app.route("/submit")
+    .get((req, res)=>{
+        if (req.isAuthenticated()){
+            res.render("submit");
+        } else {
+            res.redirect("/login");
+        }
+    })
+    .post((req,res)=>{
+        const submittedSecret = req.body.secret;
+        console.log(req.user.id);
+
+        User.findById(req.user.id, (err, foundUser)=>{
+            if(err){
+                console.log(err)
+            } else {
+                if (foundUser) {
+                    foundUser.secret = submittedSecret;
+                    foundUser.save( ()=>{
+                        res.redirect("/secrets");
+                    });
+                }
+            }
+        });
+    }) 
 
 app.get("/logout", (req,res)=>{
     req.logout((err)=> {
